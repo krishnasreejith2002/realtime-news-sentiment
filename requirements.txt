@@ -2,3 +2,5 @@ streamlit==1.30.0
 requests==2.31.0
 vaderSentiment==3.3.2
 pandas==2.2.1
+numpy==1.26.0
+pyspark==3.4.1
