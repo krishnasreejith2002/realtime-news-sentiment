@@ -2,59 +2,46 @@ import streamlit as st
 import requests
 import pandas as pd
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-from time import sleep
 
-# ----------------------------
-# CONFIG
-# ----------------------------
-GNEWS_API_KEY = "f46d6c567e17c4981634467e431e3721"  # <-- replace with your API key
-GNEWS_URL = "https://gnews.io/api/v4/top-headlines"
+# -------------------------
+# Config
+# -------------------------
+API_KEY = st.secrets["f46d6c567e17c4981634467e431e3721"]  # put API key in Streamlit secrets
+BASE_URL = "https://gnews.io/api/v4/top-headlines"
+CATEGORIES = ["business", "technology", "sports", "entertainment"]
 
 analyzer = SentimentIntensityAnalyzer()
 
-st.set_page_config(page_title="Real-Time News Sentiment", layout="wide")
-st.title("📰 Real-Time News Sentiment Dashboard")
-
-# ----------------------------
-# FUNCTIONS
-# ----------------------------
-def fetch_news(query="India", max_results=5):
+def fetch_gnews(category="business", max_results=5):
     params = {
-        "q": query,
-        "token": GNEWS_API_KEY,
+        "token": API_KEY,
+        "category": category,
         "lang": "en",
         "max": max_results
     }
-    response = requests.get(GNEWS_URL, params=params)
-    if response.status_code == 200:
-        articles = response.json().get("articles", [])
-        return [{"title": art["title"]} for art in articles]
-    else:
-        st.error(f"Failed to fetch news: {response.status_code}")
-        return []
+    r = requests.get(BASE_URL, params=params)
+    r.raise_for_status()
+    articles = r.json().get("articles", [])
+    return [(a["title"], category) for a in articles]
 
-def classify_sentiment(title):
+def vader_sentiment(title):
     score = analyzer.polarity_scores(title)["compound"]
     return "Positive" if score >= 0 else "Negative"
 
-def get_dataframe(news_list):
-    df = pd.DataFrame(news_list)
-    df["sentiment"] = df["title"].apply(classify_sentiment)
-    return df
+# -------------------------
+# Streamlit UI
+# -------------------------
+st.title("📰 Real-Time News Sentiment Dashboard")
 
-# ----------------------------
-# STREAMING LOOP
-# ----------------------------
-query = st.text_input("Search news for keyword:", value="India")
-batch_size = st.number_input("Number of headlines per batch:", min_value=1, max_value=20, value=5)
-
-placeholder = st.empty()
-
-while True:
-    news_list = fetch_news(query=query, max_results=batch_size)
-    if news_list:
-        df = get_dataframe(news_list)
-        placeholder.dataframe(df)
+selected_category = st.selectbox("Select category", CATEGORIES)
+if st.button("Fetch Latest News"):
+    news = fetch_gnews(selected_category, max_results=10)
+    if not news:
+        st.warning("No news found.")
     else:
-        placeholder.write("No news available.")
-    sleep(10)  # refresh every 10 seconds
+        df = pd.DataFrame(news, columns=["title", "category"])
+        df["sentiment"] = df["title"].apply(vader_sentiment)
+        st.dataframe(df)
+
+        # Visualization
+        st.bar_chart(df["sentiment"].value_counts())
