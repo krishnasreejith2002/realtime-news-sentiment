@@ -2,11 +2,15 @@ import streamlit as st
 import pandas as pd
 import requests
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+import time
 
 # ------------------------
 # Streamlit UI
 # ------------------------
 st.title("Real-Time News Sentiment Dashboard")
+
+# Set refresh interval (in seconds)
+REFRESH_INTERVAL = 30
 
 # ------------------------
 # GNews API Key
@@ -14,42 +18,49 @@ st.title("Real-Time News Sentiment Dashboard")
 API_KEY = "f46d6c567e17c4981634467e431e3721"  # <-- Replace with your actual key
 URL = f"https://gnews.io/api/v4/top-headlines?country=in&max=10&apikey={API_KEY}"
 
-# Fetch latest news
-response = requests.get(URL)
-data = response.json()
-articles = data.get('articles', [])
+# Initialize VADER
+analyzer = SentimentIntensityAnalyzer()
 
-if not articles:
-    st.warning("No news fetched. Check your API key or internet connection.")
-else:
-    df = pd.DataFrame(articles)
+# ------------------------
+# Sentiment function
+# ------------------------
+def get_sentiment(text):
+    score = analyzer.polarity_scores(text)['compound']
+    if score >= 0.0:       # Positive if >= 0.0
+        return "Positive"
+    else:                  # Negative if < 0.0
+        return "Negative"
 
-    # Handle missing description
-    if 'description' not in df.columns:
-        df['description'] = ""
-    df = df[['title', 'description']]
+# ------------------------
+# Main loop for auto-refresh
+# ------------------------
+while True:
+    response = requests.get(URL)
+    data = response.json()
+    articles = data.get('articles', [])
 
-    # ------------------------
-    # Sentiment Analysis
-    # ------------------------
-    analyzer = SentimentIntensityAnalyzer()
+    if not articles:
+        st.warning("No news fetched. Check your API key or internet connection.")
+    else:
+        df = pd.DataFrame(articles)
 
-    def get_sentiment(text):
-        score = analyzer.polarity_scores(text)['compound']
-        if score >= 0.05:
-            return "Positive"
-        elif score <= -0.05:
-            return "Negative"
-        else:
-            return "Neutral"
+        # Handle missing description
+        if 'description' not in df.columns:
+            df['description'] = ""
 
-    df['sentiment'] = df['title'].apply(get_sentiment)
+        # Combine title + description for better sentiment
+        df['full_text'] = df['title'] + " " + df['description']
 
-    # ------------------------
-    # Display in Streamlit
-    # ------------------------
-    st.subheader("Latest News with Sentiment")
-    st.dataframe(df[['title', 'sentiment']])
+        # Get sentiment
+        df['sentiment'] = df['full_text'].apply(get_sentiment)
 
-    st.subheader("Sentiment Distribution")
-    st.bar_chart(df['sentiment'].value_counts())
+        # Display news
+        st.subheader("Latest News with Sentiment")
+        st.dataframe(df[['title', 'sentiment']])
+
+        # Display sentiment distribution
+        st.subheader("Sentiment Distribution")
+        st.bar_chart(df['sentiment'].value_counts())
+
+    # Wait before next refresh
+    time.sleep(REFRESH_INTERVAL)
