@@ -1,86 +1,58 @@
 import streamlit as st
-import requests
 import pandas as pd
-import time
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+import requests
+from pyspark.sql import SparkSession
+from pyspark.ml.feature import Tokenizer, StopWordsRemover, HashingTF, IDF
+from pyspark.ml.classification import LogisticRegression
+from pyspark.ml import Pipeline
+from pyspark.sql.functions import col
 
-# -------------------------
-# App Title
-# -------------------------
-st.set_page_config(page_title="Real-Time News Sentiment", layout="wide")
-st.title("📰 Real-Time News Sentiment Dashboard")
+# --- Streamlit UI ---
+st.title("Real-Time News Sentiment Dashboard")
 
-# -------------------------
-# API Config
-# -------------------------
-API_KEY = st.secrets["f46d6c567e17c4981634467e431e3721"]  # Secure way (set in Streamlit secrets)
-BASE_URL = "https://gnews.io/api/v4/top-headlines"
+# --- GNews API Key ---
+API_KEY = "f46d6c567e17c4981634467e431e3721"  # Replace with your actual key
+URL = f"https://gnews.io/api/v4/top-headlines?country=in&max=10&apikey={API_KEY}"
 
-# -------------------------
-# Sentiment Analyzer
-# -------------------------
-analyzer = SentimentIntensityAnalyzer()
+# Fetch news
+response = requests.get(URL)
+data = response.json()
+articles = data.get('articles', [])
+df = pd.DataFrame(articles)
 
-def get_sentiment(text: str) -> str:
-    score = analyzer.polarity_scores(text)['compound']
-    if score >= 0.05:
-        return "Positive"
-    elif score <= -0.05:
-        return "Negative"
-    else:
-        return "Neutral"
+# Handle missing description
+if 'description' not in df.columns:
+    df['description'] = ""
+df = df[['title', 'description']]
 
-# -------------------------
-# Fetch GNews
-# -------------------------
-def fetch_gnews(category="business", max_results=5):
-    params = {
-        "token": API_KEY,
-        "category": category,
-        "lang": "en",
-        "max": max_results
-    }
-    try:
-        r = requests.get(BASE_URL, params=params, timeout=10)
-        r.raise_for_status()
-        articles = r.json().get("articles", [])
-        return [(a["title"], category) for a in articles]
-    except Exception as e:
-        st.error(f"⚠️ Error fetching news: {e}")
-        return []
+# --- Spark Setup ---
+spark = SparkSession.builder.appName("NewsSentiment").getOrCreate()
+spark_df = spark.createDataFrame(df)
 
-# -------------------------
-# Sidebar Controls
-# -------------------------
-categories = ["business", "technology", "sports", "entertainment"]
-selected_categories = st.sidebar.multiselect("Select Categories", categories, default=categories)
-refresh_time = st.sidebar.slider("Refresh interval (seconds)", 10, 120, 30)
+# --- Dummy sentiment labels ---
+spark_df = spark_df.withColumn(
+    "label",
+    col("title").rlike("Modi|success|good|happy|announces").cast("double")
+)
 
-# -------------------------
-# Streaming Loop
-# -------------------------
-placeholder = st.empty()
-seen_titles = set()
+# --- ML Pipeline ---
+tokenizer = Tokenizer(inputCol="title", outputCol="words")
+remover = StopWordsRemover(inputCol="words", outputCol="filtered")
+hashingTF = HashingTF(inputCol="filtered", outputCol="rawFeatures", numFeatures=1000)
+idf = IDF(inputCol="rawFeatures", outputCol="features")
+lr = LogisticRegression(featuresCol="features", labelCol="label")
+pipeline = Pipeline(stages=[tokenizer, remover, hashingTF, idf, lr])
 
-while True:
-    batch_titles = []
-    for cat in selected_categories:
-        news = fetch_gnews(category=cat, max_results=5)
-        for t in news:
-            if t[0] not in seen_titles:
-                seen_titles.add(t[0])
-                batch_titles.append(t)
+model = pipeline.fit(spark_df)
+predictions = model.transform(spark_df)
 
-    if batch_titles:
-        df = pd.DataFrame(batch_titles, columns=["title", "category"])
-        df["sentiment"] = df["title"].apply(get_sentiment)
+# Convert to Pandas for Streamlit
+pred_df = predictions.select("title", "prediction").toPandas()
+pred_df['sentiment'] = pred_df['prediction'].apply(lambda x: "Positive" if x == 1.0 else "Negative")
 
-        with placeholder.container():
-            st.subheader("📊 Latest News Sentiment")
-            st.dataframe(df, use_container_width=True)
+# --- Display ---
+st.subheader("Latest News with Sentiment")
+st.dataframe(pred_df[['title', 'sentiment']])
 
-            # Sentiment counts
-            sentiment_counts = df["sentiment"].value_counts()
-            st.bar_chart(sentiment_counts)
-
-    time.sleep(refresh_time)
+st.subheader("Sentiment Distribution")
+st.bar_chart(pred_df['sentiment'].value_counts())
