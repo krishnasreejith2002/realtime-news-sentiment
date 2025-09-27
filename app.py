@@ -9,58 +9,58 @@ import time
 # ------------------------
 st.title("Real-Time News Sentiment Dashboard")
 
-# Set refresh interval (in seconds)
+# Refresh interval (seconds)
 REFRESH_INTERVAL = 30
 
-# ------------------------
 # GNews API Key
-# ------------------------
-API_KEY = "f46d6c567e17c4981634467e431e3721"  # <-- Replace with your actual key
+API_KEY = "f46d6c567e17c4981634467e431e3721"  # <-- Replace with your key
 URL = f"https://gnews.io/api/v4/top-headlines?country=in&max=10&apikey={API_KEY}"
 
 # Initialize VADER
 analyzer = SentimentIntensityAnalyzer()
 
-# ------------------------
 # Sentiment function
-# ------------------------
 def get_sentiment(text):
     score = analyzer.polarity_scores(text)['compound']
-    if score >= 0.0:       # Positive if >= 0.0
-        return "Positive"
-    else:                  # Negative if < 0.0
-        return "Negative"
+    return "Positive" if score >= 0.0 else "Negative"
 
-# ------------------------
+# Function to color-code sentiment
+def color_sentiment(val):
+    color = 'green' if val == 'Positive' else 'red'
+    return f'color: {color}'
+
+# Containers for smooth updates
+news_container = st.empty()
+chart_container = st.empty()
+
 # Main loop for auto-refresh
-# ------------------------
 while True:
     response = requests.get(URL)
     data = response.json()
     articles = data.get('articles', [])
 
-    if not articles:
-        st.warning("No news fetched. Check your API key or internet connection.")
-    else:
+    if articles:
         df = pd.DataFrame(articles)
 
-        # Handle missing description
         if 'description' not in df.columns:
             df['description'] = ""
 
-        # Combine title + description for better sentiment
+        # Combine title + description
         df['full_text'] = df['title'] + " " + df['description']
-
-        # Get sentiment
         df['sentiment'] = df['full_text'].apply(get_sentiment)
 
-        # Display news
-        st.subheader("Latest News with Sentiment")
-        st.dataframe(df[['title', 'sentiment']])
+        # Apply color styling
+        styled_df = df[['title', 'sentiment']].style.applymap(color_sentiment, subset=['sentiment'])
 
-        # Display sentiment distribution
-        st.subheader("Sentiment Distribution")
-        st.bar_chart(df['sentiment'].value_counts())
+        # Update news table
+        news_container.subheader("Latest News with Sentiment")
+        news_container.dataframe(styled_df)
 
-    # Wait before next refresh
+        # Update sentiment bar chart
+        chart_container.subheader("Sentiment Distribution")
+        chart_container.bar_chart(df['sentiment'].value_counts())
+
+    else:
+        news_container.warning("No news fetched. Check your API key or internet connection.")
+
     time.sleep(REFRESH_INTERVAL)
