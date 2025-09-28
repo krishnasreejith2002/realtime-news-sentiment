@@ -13,7 +13,7 @@ st.title("Real-Time News Sentiment Dashboard")
 REFRESH_INTERVAL = 30
 
 # GNews API Key
-API_KEY = "f46d6c567e17c4981634467e431e3721"  # <-- Replace with your key
+API_KEY = "cfdd5da47f7bb9f974c259bede584f64"  # <-- Replace with your key
 URL = f"https://gnews.io/api/v4/top-headlines?country=in&max=10&apikey={API_KEY}"
 
 # Initialize VADER
